@@ -12,9 +12,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go/middleware"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/fieldpath"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/upjet/v2/pkg/metrics"
+	tjresource "github.com/crossplane/upjet/v2/pkg/resource"
 	"github.com/crossplane/upjet/v2/pkg/terraform"
 	"github.com/hashicorp/aws-sdk-go-base/v2/endpoints"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -156,8 +158,31 @@ func SelectTerraformSetup(config *SetupConfig) terraform.SetupFn { // nolint:goc
 		if config.TerraformProvider == nil {
 			return terraform.Setup{}, errors.New("terraform provider cannot be nil")
 		}
-		return ps, errors.Wrap(configureNoForkAWSClient(ctx, &ps, config, awsCfg.Region, credCache.creds, pc), "could not configure the no-fork AWS client")
+		forceS3Tagging, err := bucketForceS3Tagging(mg)
+		if err != nil {
+			return terraform.Setup{}, errors.Wrap(err, "cannot resolve bucket tagging API")
+		}
+		return ps, errors.Wrap(configureNoForkAWSClient(ctx, &ps, config, awsCfg.Region, credCache.creds, pc, forceS3Tagging), "could not configure the no-fork AWS client")
 	}
+}
+
+// bucketForceS3Tagging scopes the compatibility option to ordinary S3 buckets,
+// independently of their API version or scope. The synthetic field is omitted
+// from GetParameters, so read it from the managed resource's JSON representation.
+func bucketForceS3Tagging(mg resource.Managed) (bool, error) {
+	tr, ok := mg.(tjresource.Terraformed)
+	if !ok || tr.GetTerraformResourceType() != "aws_s3_bucket" {
+		return false, nil
+	}
+	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(mg)
+	if err != nil {
+		return false, errors.Wrap(err, "cannot convert managed resource to unstructured")
+	}
+	force, err := fieldpath.Pave(u).GetBool("spec.forProvider.forceS3Tagging")
+	if fieldpath.IsNotFound(err) {
+		return false, nil
+	}
+	return force, errors.Wrap(err, "cannot read spec.forProvider.forceS3Tagging")
 }
 
 func setPartition(awsCfg *aws.Config, pc *namespacedv1beta1.ClusterProviderConfig, ps *terraform.Setup) error {
@@ -343,7 +368,7 @@ func withExternalAPICallCounter(stack *middleware.Stack) error {
 // configureNoForkAWSClient populates the supplied *terraform.Setup with
 // Terraform Plugin SDK style AWS client (Meta) and Terraform Plugin Framework
 // style FrameworkProvider
-func configureNoForkAWSClient(ctx context.Context, ps *terraform.Setup, config *SetupConfig, region string, creds aws.Credentials, pc *namespacedv1beta1.ClusterProviderConfig) error { //nolint:gocyclo
+func configureNoForkAWSClient(ctx context.Context, ps *terraform.Setup, config *SetupConfig, region string, creds aws.Credentials, pc *namespacedv1beta1.ClusterProviderConfig, forceS3Tagging bool) error { //nolint:gocyclo
 	tfAwsConnsCfg := xpprovider.AWSConfig{
 		AccessKey:               creds.AccessKeyID,
 		Endpoints:               map[string]string{},
@@ -382,9 +407,12 @@ func configureNoForkAWSClient(ctx context.Context, ps *terraform.Setup, config *
 	if diags.HasError() {
 		return errors.Errorf("cannot construct TF AWS Client from TF AWS Config, %v", diags)
 	}
-	// Keep the Terraform client's account ID empty when explicitly requested
-	// by the ProviderConfig.
-	if !pc.Spec.SkipReqAccountId {
+	// Normally reuse the cached account ID instead of making another STS call.
+	// Only an opted-in aws_s3_bucket leaves this fresh client's account ID empty
+	// to select standard S3 tagging for both reads and writes. ClientMetadata and
+	// cached identities retain their account IDs for external-name templates and
+	// other resources sharing the ProviderConfig.
+	if !forceS3Tagging {
 		tfAwsConnsClient.SetAccountID(ps.ClientMetadata[keyAccountID])
 	}
 	ps.Meta = tfAwsConnsClient
