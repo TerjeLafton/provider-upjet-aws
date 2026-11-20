@@ -3815,6 +3815,11 @@ func (in *BucketParameters) DeepCopyInto(out *BucketParameters) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.ForceS3Tagging != nil {
+		in, out := &in.ForceS3Tagging, &out.ForceS3Tagging
+		*out = new(bool)
+		**out = **in
+	}
 	if in.ObjectLockEnabled != nil {
 		in, out := &in.ObjectLockEnabled, &out.ObjectLockEnabled
 		*out = new(bool)

@@ -943,6 +943,11 @@ spec:
                       require replacing the bucket or destroying the bucket, this
                       flag will not work.
                     type: boolean
+                  forceS3Tagging:
+                    description: Use the standard S3 bucket tagging API instead of
+                      S3 Control. Enable this for S3-compatible endpoints that do
+                      not support S3 Control. Defaults to false.
+                    type: boolean
                   objectLockEnabled:
                     description: Whether this bucket has an Object Lock configuration
                       enabled. Valid values are true or false. This argument is not

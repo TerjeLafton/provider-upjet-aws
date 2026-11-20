@@ -153,6 +153,11 @@ type BucketParameters struct {
 	// +kubebuilder:validation:Optional
 	ForceDestroy *bool `json:"forceDestroy,omitempty" tf:"force_destroy,omitempty"`
 
+	// Use the standard S3 bucket tagging API instead of S3 Control. Enable this for S3-compatible endpoints that do not support S3 Control. Defaults to false.
+	// +upjet:crd:field:TFTag=-
+	// +kubebuilder:validation:Optional
+	ForceS3Tagging *bool `json:"forceS3Tagging,omitempty" tf:"-"`
+
 	// Whether this bucket has an Object Lock configuration enabled. Valid values are true or false. This argument is not supported in all regions or partitions.
 	// +kubebuilder:validation:Optional
 	ObjectLockEnabled *bool `json:"objectLockEnabled,omitempty" tf:"object_lock_enabled,omitempty"`
